@@ -5,19 +5,14 @@ import com.hakkitaygun.unilink.common.entity.AuditableEntity;
 import com.hakkitaygun.unilink.posting.entity.Posting;
 import com.hakkitaygun.unilink.posting.entity.PostingRole;
 import com.hakkitaygun.unilink.user.entity.User;
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "applications")
@@ -40,6 +35,13 @@ public class Application extends AuditableEntity {
 
     @Column(length = 1000)
     private String message;
+
+    @ManyToMany
+    @JoinTable(
+            name = "application_roles",
+            joinColumns = @JoinColumn(name = "application_id"),
+            inverseJoinColumns = @JoinColumn(name = "posting_role_id"))
+    private Set<PostingRole> appliedRoles = new HashSet<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "accepted_role_id")
