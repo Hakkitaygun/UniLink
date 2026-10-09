@@ -1,0 +1,9 @@
+package com.hakkitaygun.unilink.user.repository;
+
+import com.hakkitaygun.unilink.user.entity.Profile;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.UUID;
+
+public interface ProfileRepository extends JpaRepository<Profile, UUID> {
+}
