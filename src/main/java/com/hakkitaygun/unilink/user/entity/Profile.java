@@ -2,9 +2,7 @@ package com.hakkitaygun.unilink.user.entity;
 
 import com.hakkitaygun.unilink.technology.entity.Technology;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -18,6 +16,8 @@ import java.util.UUID;
 @Getter
 @Setter
 @NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class Profile {
 
     @Id
@@ -47,6 +47,7 @@ public class Profile {
     @Column(name = "linkedin_url", length = 255)
     private String linkedinUrl;
 
+    @Builder.Default
     @ManyToMany
     @JoinTable(
             name = "profile_technologies",
