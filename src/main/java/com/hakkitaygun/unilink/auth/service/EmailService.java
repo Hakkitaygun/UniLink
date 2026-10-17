@@ -12,20 +12,17 @@ public class EmailService {
 
     private final JavaMailSender mailSender;
 
-    @Value("${app.verification-url:http://localhost:8080}")
-    private String baseUrl;
-
     @Value("${app.frontend-url:http://localhost:3000}")
     private String frontendUrl;
 
     public void sendVerificationEmail(String to, String rawToken) {
         String text = """
-                UniLink hesabınızı doğrulamak için aşağıdaki bağlantıyı kullanın:
+          UniLink hesabınızı doğrulamak için aşağıdaki bağlantıyı kullanın:
 
-                %s/api/auth/verify-email?token=%s
+          %s/verify-email?token=%s
 
-                Bu bağlantı 24 saat geçerlidir.
-                """.formatted(baseUrl, rawToken);
+          Bu bağlantı 24 saat geçerlidir.
+          """.formatted(frontendUrl, rawToken);
 
         send(to, "UniLink e-posta doğrulama", text);
     }
