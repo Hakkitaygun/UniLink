@@ -1,6 +1,6 @@
 package com.hakkitaygun.unilink.posting.repository;
 
-import com.hakkitaygun.unilink.posting.SavedPostingId;
+import com.hakkitaygun.unilink.posting.entity.SavedPostingId;
 import com.hakkitaygun.unilink.posting.entity.SavedPosting;
 import org.springframework.data.jpa.repository.JpaRepository;
 

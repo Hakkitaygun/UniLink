@@ -1,4 +1,4 @@
-package com.hakkitaygun.unilink.posting;
+package com.hakkitaygun.unilink.posting.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Embeddable;

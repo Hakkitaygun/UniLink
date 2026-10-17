@@ -1,6 +1,5 @@
 package com.hakkitaygun.unilink.posting.entity;
 
-import com.hakkitaygun.unilink.posting.SavedPostingId;
 import com.hakkitaygun.unilink.user.entity.User;
 import jakarta.persistence.Column;
 import jakarta.persistence.EmbeddedId;
