@@ -1,7 +1,9 @@
 package com.hakkitaygun.unilink.posting.controller;
 
-import com.hakkitaygun.unilink.posting.dto.CreatePostingRequest;
-import com.hakkitaygun.unilink.posting.dto.PostingResponse;
+import com.hakkitaygun.unilink.common.dto.PageResponse;
+import com.hakkitaygun.unilink.posting.dto.*;
+import com.hakkitaygun.unilink.posting.enums.PostingSort;
+import com.hakkitaygun.unilink.posting.enums.PostingType;
 import com.hakkitaygun.unilink.posting.service.PostingService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +13,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -27,8 +30,35 @@ public class PostingController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    @GetMapping
+    public PageResponse<PostingSummaryResponse> feed(@RequestParam(defaultValue = "0") int page,
+                                                     @RequestParam(defaultValue = "12") int size,
+                                                     @RequestParam(defaultValue = "NEWEST") PostingSort sort,
+                                                     @RequestParam(required = false) PostingType type,
+                                                     @RequestParam(required = false) String query,
+                                                     @RequestParam(required = false) List<String> technologies,
+                                                     @RequestParam(required = false) String role,
+                                                     @RequestParam(required = false) String department,
+                                                     @RequestParam(required = false) String university) {
+        PostingFilter filter = new PostingFilter(type, query, technologies, role, department, university);
+        return postingService.getFeed(page, size, sort, filter);
+    }
+
     @GetMapping("/{id}")
     public PostingResponse getById(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         return postingService.getById(id, UUID.fromString(jwt.getSubject()));
+    }
+
+    @PutMapping("/{id}")
+    public PostingResponse update(@AuthenticationPrincipal Jwt jwt,
+                                  @PathVariable UUID id,
+                                  @Valid @RequestBody UpdatePostingRequest request) {
+        return postingService.update(id, UUID.fromString(jwt.getSubject()), request);
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        postingService.cancel(id, UUID.fromString(jwt.getSubject()));
+        return ResponseEntity.noContent().build();
     }
 }
