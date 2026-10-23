@@ -1,7 +1,12 @@
 package com.hakkitaygun.unilink.posting.service;
 
 import com.hakkitaygun.unilink.common.dto.PageResponse;
-import com.hakkitaygun.unilink.posting.dto.*;
+import com.hakkitaygun.unilink.posting.dto.CreatePostingRequest;
+import com.hakkitaygun.unilink.posting.dto.PostingFilter;
+import com.hakkitaygun.unilink.posting.dto.PostingResponse;
+import com.hakkitaygun.unilink.posting.dto.PostingRoleRequest;
+import com.hakkitaygun.unilink.posting.dto.PostingSummaryResponse;
+import com.hakkitaygun.unilink.posting.dto.UpdatePostingRequest;
 import com.hakkitaygun.unilink.posting.entity.Posting;
 import com.hakkitaygun.unilink.posting.entity.PostingRole;
 import com.hakkitaygun.unilink.posting.enums.PostingSort;
@@ -11,6 +16,7 @@ import com.hakkitaygun.unilink.posting.enums.PostingType;
 import com.hakkitaygun.unilink.posting.exception.InvalidPostingException;
 import com.hakkitaygun.unilink.posting.exception.PostingAccessDeniedException;
 import com.hakkitaygun.unilink.posting.exception.PostingNotFoundException;
+import com.hakkitaygun.unilink.posting.mapper.PostingSummaryMapper;
 import com.hakkitaygun.unilink.posting.repository.PostingRepository;
 import com.hakkitaygun.unilink.posting.specification.PostingSpecifications;
 import com.hakkitaygun.unilink.technology.service.TechnologyService;
@@ -29,9 +35,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.*;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -41,6 +50,7 @@ public class PostingService {
     private final UserRepository userRepository;
     private final ProfileRepository profileRepository;
     private final TechnologyService technologyService;
+    private final PostingSummaryMapper postingSummaryMapper;
 
     @Transactional
     public PostingResponse create(UUID ownerId, CreatePostingRequest request) {
@@ -48,7 +58,6 @@ public class PostingService {
 
         Profile ownerProfile = profileRepository.findById(ownerId)
                 .orElseThrow(ProfileNotFoundException::new);
-
 
         Posting posting = new Posting();
         posting.setOwner(userRepository.getReferenceById(ownerId));
@@ -69,7 +78,7 @@ public class PostingService {
         }
 
         postingRepository.save(posting);
-        return PostingResponse.from(posting, ownerProfile, Map.of());
+        return PostingResponse.from(posting, ownerProfile, Map.of(), false);
     }
 
     @Transactional(readOnly = true)
@@ -85,12 +94,14 @@ public class PostingService {
         Profile ownerProfile = profileRepository.findById(ownerId)
                 .orElseThrow(ProfileNotFoundException::new);
 
-        return PostingResponse.from(posting, ownerProfile, Map.of());
+        return PostingResponse.from(posting, ownerProfile,
+                postingSummaryMapper.acceptedCounts(List.of(posting)),
+                postingSummaryMapper.isSaved(currentUserId, postingId));
     }
 
     @Transactional(readOnly = true)
     public PageResponse<PostingSummaryResponse> getFeed(int page, int size, PostingSort sort,
-                                                        PostingFilter filter) {
+                                                        PostingFilter filter, UUID viewerId) {
         int safePage = Math.max(page, 0);
         int safeSize = Math.min(Math.max(size, 1), 50);
 
@@ -106,21 +117,13 @@ public class PostingService {
                 .and(PostingSpecifications.hasAnyTechnology(filter.technologies()))
                 .and(PostingSpecifications.hasRole(filter.role()))
                 .and(PostingSpecifications.ownerDepartmentContains(filter.department()))
-                .and(PostingSpecifications.ownerUniversityContains(filter.university()));
+                .and(PostingSpecifications.ownerUniversityContains(filter.university()))
+                .and(PostingSpecifications.hasVacancy(filter.hasVacancy()));
 
         Page<Posting> postings = postingRepository.findAll(spec, pageable);
 
-        Set<UUID> ownerIds = postings.getContent().stream()
-                .map(posting -> posting.getOwner().getId())
-                .collect(Collectors.toSet());
-        Map<UUID, Profile> profiles = profileRepository.findAllById(ownerIds).stream()
-                .collect(Collectors.toMap(Profile::getUserId, Function.identity()));
-
-        List<PostingSummaryResponse> content = postings.getContent().stream()
-                .map(posting -> PostingSummaryResponse.from(
-                        posting, profiles.get(posting.getOwner().getId()), Map.of()))
-                .toList();
-
+        List<PostingSummaryResponse> content =
+                postingSummaryMapper.toSummaries(postings.getContent(), viewerId);
         return PageResponse.of(postings, content);
     }
 
@@ -158,7 +161,9 @@ public class PostingService {
 
         Profile ownerProfile = profileRepository.findById(ownerId)
                 .orElseThrow(ProfileNotFoundException::new);
-        return PostingResponse.from(posting, ownerProfile, Map.of());
+        return PostingResponse.from(posting, ownerProfile,
+                postingSummaryMapper.acceptedCounts(List.of(posting)),
+                postingSummaryMapper.isSaved(currentUserId, postingId));
     }
 
     @Transactional

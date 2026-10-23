@@ -18,6 +18,7 @@ public record PostingSummaryResponse(
         String shortDescription,
         String organizationName,
         boolean open,
+        boolean saved,
         Instant deadline,
         Instant createdAt,
         PostingOwnerResponse owner,
@@ -30,7 +31,8 @@ public record PostingSummaryResponse(
 
     public static PostingSummaryResponse from(Posting posting,
                                               Profile ownerProfile,
-                                              Map<UUID, Integer> acceptedCounts) {
+                                              Map<UUID, Integer> acceptedCounts,
+                                              boolean saved) {
         List<PostingRoleResponse> roles = posting.getRoles().stream()
                 .map(role -> PostingRoleResponse.from(role, acceptedCounts.getOrDefault(role.getId(), 0)))
                 .sorted(Comparator.comparing(PostingRoleResponse::role, String.CASE_INSENSITIVE_ORDER))
@@ -50,6 +52,7 @@ public record PostingSummaryResponse(
                 snippet(posting.getDescription()),
                 posting.getOrganizationName(),
                 posting.isOpen(Instant.now()),
+                saved,
                 posting.getDeadline(),
                 posting.getCreatedAt(),
                 PostingOwnerResponse.from(ownerProfile),

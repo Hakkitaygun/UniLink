@@ -31,7 +31,8 @@ public class PostingController {
     }
 
     @GetMapping
-    public PageResponse<PostingSummaryResponse> feed(@RequestParam(defaultValue = "0") int page,
+    public PageResponse<PostingSummaryResponse> feed(@AuthenticationPrincipal Jwt jwt,
+                                                     @RequestParam(defaultValue = "0") int page,
                                                      @RequestParam(defaultValue = "12") int size,
                                                      @RequestParam(defaultValue = "NEWEST") PostingSort sort,
                                                      @RequestParam(required = false) PostingType type,
@@ -39,9 +40,10 @@ public class PostingController {
                                                      @RequestParam(required = false) List<String> technologies,
                                                      @RequestParam(required = false) String role,
                                                      @RequestParam(required = false) String department,
-                                                     @RequestParam(required = false) String university) {
-        PostingFilter filter = new PostingFilter(type, query, technologies, role, department, university);
-        return postingService.getFeed(page, size, sort, filter);
+                                                     @RequestParam(required = false) String university,
+                                                     @RequestParam(required = false) Boolean hasVacancy) {
+        PostingFilter filter = new PostingFilter(type, query, technologies, role, department, university, hasVacancy);
+        return postingService.getFeed(page, size, sort, filter, UUID.fromString(jwt.getSubject()));
     }
 
     @GetMapping("/{id}")

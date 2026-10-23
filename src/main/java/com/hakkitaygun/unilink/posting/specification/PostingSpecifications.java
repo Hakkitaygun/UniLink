@@ -1,5 +1,6 @@
 package com.hakkitaygun.unilink.posting.specification;
 
+import com.hakkitaygun.unilink.application.entity.Application;
 import com.hakkitaygun.unilink.common.util.TextNormalizer;
 import com.hakkitaygun.unilink.posting.entity.Posting;
 import com.hakkitaygun.unilink.posting.entity.PostingRole;
@@ -105,6 +106,28 @@ public final class PostingSpecifications {
             subquery.select(profile.get("userId"))
                     .where(cb.like(folded(cb, profile.<String>get("university")), pattern, '\\'));
             return root.get("owner").get("id").in(subquery);
+        };
+    }
+
+    public static Specification<Posting> hasVacancy(Boolean hasVacancy) {
+        if (hasVacancy == null || !hasVacancy) {
+            return Specification.unrestricted();
+        }
+        return (root, query, cb) -> {
+            Subquery<Integer> roleQuery = query.subquery(Integer.class);
+            Root<PostingRole> role = roleQuery.from(PostingRole.class);
+
+            Subquery<Long> acceptedQuery = roleQuery.subquery(Long.class);
+            Root<Application> application = acceptedQuery.from(Application.class);
+            acceptedQuery.select(cb.count(application))
+                    .where(cb.equal(application.get("acceptedRole"), role));
+
+            roleQuery.select(cb.literal(1))
+                    .where(
+                            cb.equal(role.get("posting"), root),
+                            cb.gt(role.<Integer>get("requiredCount"), acceptedQuery));
+
+            return cb.exists(roleQuery);
         };
     }
 

@@ -10,6 +10,7 @@ public record PostingFilter(
         List<String> technologies,
         String role,
         String department,
-        String university
+        String university,
+        Boolean hasVacancy
 ) {
 }
