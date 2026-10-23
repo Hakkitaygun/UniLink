@@ -75,4 +75,16 @@ public class Application extends AuditableEntity {
         this.acceptedRole = null;
         this.decidedAt = Instant.now();
     }
+
+    public void reapply(String message, Set<PostingRole> roles) {
+        if (status != ApplicationStatus.WITHDRAWN) {
+            throw new IllegalStateException("Sadece geri çekilmiş başvuru yeniden yapılabilir");
+        }
+        this.status = ApplicationStatus.PENDING;
+        this.message = message;
+        this.acceptedRole = null;
+        this.decidedAt = null;
+        this.appliedRoles.clear();
+        this.appliedRoles.addAll(roles);
+    }
 }
