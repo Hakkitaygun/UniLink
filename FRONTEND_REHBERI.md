@@ -220,6 +220,7 @@ Uygulamanın **kendi ürettiği** tüm hatalar aynı biçimdedir:
 | **403** | Yetkin yok (örn. ilanın sahibi değilsin) ya da giriş yaparken hesap durumu uygun değil | `message`'ı göster. Giriş sırasında 403 = e-posta doğrulanmamış ya da hesap kapalı (5.3) |
 | **404** | Bulunamadı. **Bazı durumlarda "yetkin yok" yerine bilerek 404 döner** (bir ilan iptal edildiyse başkaları için yokmuş gibi davranılır) | "Bulunamadı" sayfası |
 | **409** | Çakışma: "zaten başvurdun", "kontenjan dolu", "bu başvuru zaten sonuçlandırılmış" | `message`'ı göster, ilgili listeyi yenile |
+| **429** | Çok fazla istek (güvenlik katmanı hız sınırı). Yanıtta `Retry-After` başlığı (saniye) olur | İsteği otomatik tekrar **atma**. "Çok fazla istek gönderdin, X saniye sonra tekrar dene" göster, düğmeyi o süre pasif yap (9.3) |
 | **500** | Sunucu hatası | "Bir sorun oluştu, tekrar dene" göster |
 
 ### 3.8 Dizi parametreleri (sık yapılan hata!)
@@ -407,7 +408,8 @@ Tasarım taslağındaki sol menü maddeleri ve bağlandıkları yerler:
 | Anasayfa | `/` | İlan akışı |
 | Mesaj | — | **Henüz yok** (11. bölüm) |
 | Profil | `/profile` | |
-| Settings | — | Şimdilik yok (şifre değiştirme, hesap silme uçları yok) |
+| Settings | `/settings` | Şifre değiştirme var (5.13). Hesap silme ve e-posta değiştirme **yok** |
+| İlanlarım | `/my-postings` | Kendi açtığım ilanlar (5.15) |
 | İlan aç | `/postings/new` | |
 | Kaydedilenler | `/saved` | |
 | Başvurulan | `/applications` | |
@@ -495,8 +497,8 @@ Kartta **`open: false`** gelen bir ilan akışta normalde görünmez (akış sad
 
 - **Kullanıcının bu ilana daha önce başvurup başvurmadığını** göstermek için `GET /api/applications/mine?size=50` çağırıp
   listede `posting.id === ilanId` olanı bul (varsa durumunu göster: Bekliyor/Kabul edildi...). Şimdilik ilan yanıtında bu bilgi yok.
-- **İlanın kaydedilmiş olup olmadığını** göstermek (kalp ikonu): ilan yanıtına `saved` bayrağı **yakında eklenecek**.
-  O zamana kadar `GET /api/saved-postings?size=50` ile kaydedilen ilanların id listesini alıp kontrol edebilirsin.
+- **İlanın kaydedilmiş olup olmadığı** (kalp ikonu): ilan yanıtındaki **`saved`** (boolean) alanından okunur. Hem ilan kartında (liste) hem detayda gelir; ek istek gerekmez.
+  Kalbe basınca `PUT`/`DELETE` çağır, başarılı olunca yerelde `saved` değerini çevir.
 
 **Kaydet / kaydı kaldır:** `PUT /api/saved-postings/{id}` ve `DELETE /api/saved-postings/{id}` (ikisi de `204`; tekrar çağırmak hata vermez).
 
@@ -648,6 +650,7 @@ Süresi dolmuş (kapanmış) ilanda da karar verilebilir; iptal edilmiş ilanda 
 - En son kaydedilen en üstte.
 - Kaydedilen bir ilan **sonradan kapanırsa listede kalır**, kartta `open: false` olur; "Başvuru kapandı" rozeti göster.
 - Kaydedilen bir ilan **iptal edilirse listeden kalkar**.
+- Bu listedeki kartlarda `saved` her zaman `true` gelir.
 - Kayıttan çıkarma: `DELETE /api/saved-postings/{id}` → 204, sonra listeden kaldır.
 - İlan kaydetmek: `PUT /api/saved-postings/{id}` → 204 (kartlardaki kalp ikonu).
 
@@ -663,7 +666,13 @@ Süresi dolmuş (kapanmış) ilanda da karar verilebilir; iptal edilmiş ilanda 
 **Teknolojileri güncelleme:** `PUT /api/users/me/technologies` gövde `{ "technologies": ["Java", "Spring Boot"] }` → **200**, güncel profil.
 Bu liste mevcut listeyi **tamamen değiştirir** (boş liste gönderirsen hepsi silinir). Giriş arayüzü ilan formundakiyle aynı (5.8).
 
-**E-posta ve şifre değiştirme:** Şimdilik yok.
+**Şifre değiştirme (Settings sayfası):** `POST /api/users/me/password` gövde `{ "currentPassword": "...", "newPassword": "..." }`.
+- Başarılıysa **200** ve yeni bir token çifti (`LoginResponse` biçiminde) döner. **Yeni `accessToken` ve `refreshToken`'ı hemen kaydet**; eskileri geçersizdir.
+- Güvenlik gereği kullanıcının **diğer tüm oturumları kapatılır** (eski refresh token'lar iptal edilir). Diğer cihazlar yeniden giriş yapmak zorunda kalır; formda bunu belirt.
+- Mevcut şifre yanlışsa **400** (`message` ile). Yeni şifre kuralları kayıttakiyle aynıdır (8. bölüm), ihlalde `fieldErrors` gelir.
+- **401 ile karıştırma:** Bu uçta yanlış şifre 401 değil 400 döner, bu yüzden interceptor'ın çıkış yaptırmasına yol açmaz.
+
+**E-posta değiştirme ve hesap silme:** Yok.
 
 **Başka kullanıcıların profili:** Ayrı bir "kullanıcı profili sayfası" endpoint'i **yok**. Bir kullanıcının bilgisi sadece iki yerde görünür:
 ilan kartı/detayındaki `owner` (ad, üniversite, bölüm) ve ilan sahibine gelen başvurulardaki `applicant` (tam profil).
@@ -672,6 +681,16 @@ ilan kartı/detayındaki `owner` (ad, üniversite, bölüm) ve ilan sahibine gel
 
 Menüdeki "Logout": `POST /api/auth/logout` (gövde `{ "refreshToken": "..." }`), sonra saklı token'ları ve kullanıcı bilgisini sil, `/login`'e git.
 Çıkış isteği hata verse bile (ağ vb.) token'ları yerelde sil.
+
+### 5.15 İlanlarım (`/my-postings`)
+
+**İstek:** `GET /api/users/me/postings?page=0&size=12`. Kullanıcının **kendi açtığı** ilanlar (durumu ne olursa olsun; açık, kapalı ve iptal edilmiş) sayfalı gelir.
+Her öğede ilanın kendisi, `status` ve başvuru sayıları (`applicationCounts`) bulunur.
+
+- Karttan "Başvurular" düğmesi: `/postings/{id}/applications` (5.11).
+- İptal edilmiş ilanı soluk göster ve `CANCELLED` rozeti ekle.
+- Başvuru sayılarını rozet olarak göster (örn. bekleyen sayısı).
+- Alan adlarının tam biçimi için Swagger'a bak (6.7'deki tip önerisi o şemaya göre yazıldı).
 
 ---
 
@@ -708,6 +727,8 @@ Menüdeki "Logout": `POST /api/auth/logout` (gövde `{ "refreshToken": "..." }`)
 | 25 | `PUT /api/saved-postings/{postingId}` | Evet | İlanı kaydet | 204 |
 | 26 | `DELETE /api/saved-postings/{postingId}` | Evet | Kaydı kaldır | 204 |
 | 27 | `GET /api/saved-postings` | Evet | Kaydettiğim ilanlar | 200 |
+| 28 | `POST /api/users/me/password` | Evet | Şifre değiştir (yeni token çifti döner) | 200 |
+| 29 | `GET /api/users/me/postings` | Evet | Açtığım ilanlar (İlanlarım) | 200 |
 
 Aşağıdaki tüm "Hatalar" listeleri, **o endpoint'e özgü** hataları gösterir. Her korumalı endpoint ayrıca token yoksa/süresi dolmuşsa **401**,
 geçersiz kimlik biçiminde **400** döndürür. Bozuk JSON gönderirsen **400** (`İstek gövdesi okunamadı veya biçimi hatalı.`).
@@ -784,6 +805,16 @@ Boş ya da eksik `bio` / `githubUrl` / `linkedinUrl` **silinir** (`null` olur). 
 `[ { "id": "...", "name": "Spring Boot" } ]`. `query` boş/eksikse **tüm teknolojiler** (alfabetik), doluysa isminde geçen **en fazla 10** teknoloji.
 (Bu arama büyük/küçük harfe duyarsızdır; Türkçe harf eşlemesi ilan aramasındaki kadar kapsamlı değildir.)
 
+#### `POST /api/users/me/password` → 200 `LoginResponse`
+```json
+{ "currentPassword": "EskiSifre123", "newPassword": "YeniSifre456" }
+```
+Yanıt: yeni `accessToken`, `refreshToken`, `tokenType`, `expiresInSeconds`. Tüm eski refresh token'lar iptal edilir.
+**Hatalar:** 400 (mevcut şifre yanlış ya da yeni şifre kurala uymuyor).
+
+#### `GET /api/users/me/postings?page=0&size=12` → 200 `Sayfa<BenimİlanımÖğesi>`
+Kullanıcının açtığı tüm ilanlar (iptal edilmişler dahil), sayfalı. Öğe biçimi: ilan bilgisi + `status` + `applicationCounts` (5.15).
+
 ### 6.4 İlan endpoint'leri
 
 #### `GET /api/postings` → 200 `Sayfa<İlanKartı>`
@@ -800,6 +831,7 @@ Yalnızca **açık** ilanlar gelir. Hatalı `sort`/`type`/`hasVacancy` değeri �
   "shortDescription": "Üniversite laboratuvarı için küçük bir robotik kol geliştiriyoruz.",
   "organizationName": null,
   "open": true,
+  "saved": false,
   "deadline": "2026-12-25T20:59:59Z",
   "createdAt": "2026-10-17T17:17:05.324780Z",
   "owner": { "id": "c7dbe98b-...", "fullName": "Ayşe Yılmaz", "university": "Test Üniversitesi", "department": "Bilgisayar Mühendisliği" },
@@ -810,7 +842,7 @@ Yalnızca **açık** ilanlar gelir. Hatalı `sort`/`type`/`hasVacancy` değeri �
   "technologies": [ { "id": "558c262e-...", "name": "Arduino" }, { "id": "3dd78c90-...", "name": "Java" } ]
 }
 ```
-Kartta **`stage`, `benefitsNote` ve tam `description` yoktur**; bunlar detay sayfasındadır.
+`saved`, isteği yapan kullanıcının bu ilanı kaydedip kaydetmediğini söyler. Kartta **`stage`, `benefitsNote` ve tam `description` yoktur**; bunlar detay sayfasındadır.
 Roller ve teknolojiler alfabetik sıralıdır.
 
 #### `GET /api/postings/{id}` → 200 `İlan`
@@ -825,6 +857,7 @@ Roller ve teknolojiler alfabetik sıralıdır.
   "benefitsNote": "Hisse ve portfolyo",
   "status": "OPEN",
   "open": true,
+  "saved": true,
   "deadline": "2026-11-30T20:59:59Z",
   "createdAt": "2026-10-17T17:00:00Z",
   "owner": { "id": "...", "fullName": "Ayşe Yılmaz", "university": "Test Üniversitesi", "department": "Bilgisayar Mühendisliği" },
@@ -958,60 +991,69 @@ export type PostingStatus = "OPEN" | "CLOSED" | "CANCELLED";
 export type ApplicationStatus = "PENDING" | "ACCEPTED" | "REJECTED" | "WITHDRAWN";
 
 export interface ApiError {
-  timestamp: string; status: number; error: string; message: string; path: string;
-  fieldErrors?: Record<string, string>;
+    timestamp: string; status: number; error: string; message: string; path: string;
+    fieldErrors?: Record<string, string>;
 }
 
 export interface Page<T> {
-  content: T[]; page: number; size: number; totalElements: number; totalPages: number; hasNext: boolean;
+    content: T[]; page: number; size: number; totalElements: number; totalPages: number; hasNext: boolean;
 }
 
 export interface LoginResponse {
-  accessToken: string; refreshToken: string; tokenType: "Bearer"; expiresInSeconds: number;
+    accessToken: string; refreshToken: string; tokenType: "Bearer"; expiresInSeconds: number;
 }
 
 export interface Technology { id: string; name: string }
 
 export interface Profile {
-  userId: string; email: string; fullName: string; university: string; department: string;
-  bio: string | null; githubUrl: string | null; linkedinUrl: string | null; technologies: Technology[];
+    userId: string; email: string; fullName: string; university: string; department: string;
+    bio: string | null; githubUrl: string | null; linkedinUrl: string | null; technologies: Technology[];
 }
 
 export interface PostingOwner { id: string; fullName: string; university: string; department: string }
 
 export interface PostingRole {
-  id: string; role: string; requiredCount: number; acceptedCount: number; remainingCount: number;
+    id: string; role: string; requiredCount: number; acceptedCount: number; remainingCount: number;
 }
 
 export interface PostingSummary {            // ilan kartı (liste)
-  id: string; type: PostingType; title: string; shortDescription: string;
-  organizationName: string | null; open: boolean; deadline: string; createdAt: string;
-  owner: PostingOwner; roles: PostingRole[]; totalRemaining: number; technologies: Technology[];
+    id: string; type: PostingType; title: string; shortDescription: string;
+    organizationName: string | null; open: boolean; saved: boolean; deadline: string; createdAt: string;
+    owner: PostingOwner; roles: PostingRole[]; totalRemaining: number; technologies: Technology[];
 }
 
 export interface Posting {                   // ilan detayı
-  id: string; type: PostingType; title: string; description: string;
-  organizationName: string | null; stage: PostingStage | null; benefitsNote: string | null;
-  status: PostingStatus; open: boolean; deadline: string; createdAt: string;
-  owner: PostingOwner; roles: PostingRole[]; technologies: Technology[];
+    id: string; type: PostingType; title: string; description: string;
+    organizationName: string | null; stage: PostingStage | null; benefitsNote: string | null;
+    status: PostingStatus; open: boolean; saved: boolean; deadline: string; createdAt: string;
+    owner: PostingOwner; roles: PostingRole[]; technologies: Technology[];
 }
 
 export interface RoleRef { id: string; role: string }
 
+export interface ChangePasswordRequest { currentPassword: string; newPassword: string }
+
+// İlanlarım öğesi: kesin alan adları için Swagger'a bak; `applicationCounts` içeriği backend şemasına göre değişebilir.
+export interface MyPosting {
+    posting: Posting | PostingSummary;
+    status: PostingStatus;
+    applicationCounts: Record<string, number>;
+}
+
 export interface Application {               // başvuranın gördüğü
-  id: string; status: ApplicationStatus; message: string | null; createdAt: string; decidedAt: string | null;
-  posting: { id: string; title: string; type: PostingType; status: PostingStatus; open: boolean; deadline: string };
-  appliedRoles: RoleRef[]; acceptedRole: RoleRef | null;
+    id: string; status: ApplicationStatus; message: string | null; createdAt: string; decidedAt: string | null;
+    posting: { id: string; title: string; type: PostingType; status: PostingStatus; open: boolean; deadline: string };
+    appliedRoles: RoleRef[]; acceptedRole: RoleRef | null;
 }
 
 export interface IncomingApplication {       // ilan sahibinin gördüğü
-  id: string; status: ApplicationStatus; message: string | null; createdAt: string; decidedAt: string | null;
-  applicant: {
-    userId: string; fullName: string; university: string; department: string;
-    bio: string | null; githubUrl: string | null; linkedinUrl: string | null;
-    technologies: Technology[]; email: string | null;
-  };
-  appliedRoles: RoleRef[]; acceptedRole: RoleRef | null;
+    id: string; status: ApplicationStatus; message: string | null; createdAt: string; decidedAt: string | null;
+    applicant: {
+        userId: string; fullName: string; university: string; department: string;
+        bio: string | null; githubUrl: string | null; linkedinUrl: string | null;
+        technologies: Technology[]; email: string | null;
+    };
+    appliedRoles: RoleRef[]; acceptedRole: RoleRef | null;
 }
 ```
 
@@ -1153,16 +1195,16 @@ const ACCESS = "unilink.access";
 const REFRESH = "unilink.refresh";
 
 export const tokens = {
-  getAccess: () => localStorage.getItem(ACCESS),
-  getRefresh: () => localStorage.getItem(REFRESH),
-  set: (access: string, refresh: string) => {
-    localStorage.setItem(ACCESS, access);
-    localStorage.setItem(REFRESH, refresh);
-  },
-  clear: () => {
-    localStorage.removeItem(ACCESS);
-    localStorage.removeItem(REFRESH);
-  },
+    getAccess: () => localStorage.getItem(ACCESS),
+    getRefresh: () => localStorage.getItem(REFRESH),
+    set: (access: string, refresh: string) => {
+        localStorage.setItem(ACCESS, access);
+        localStorage.setItem(REFRESH, refresh);
+    },
+    clear: () => {
+        localStorage.removeItem(ACCESS);
+        localStorage.removeItem(REFRESH);
+    },
 };
 ```
 
@@ -1181,51 +1223,59 @@ import type { LoginResponse } from "./types";
 const baseURL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 export const api = axios.create({
-  baseURL,
-  headers: { "Content-Type": "application/json" },
-  // ÖNEMLİ: technologies=Java&technologies=React biçimi için (varsayılan technologies[]=Java backend'de çalışmaz)
-  paramsSerializer: { indexes: null },
+    baseURL,
+    headers: { "Content-Type": "application/json" },
+    // ÖNEMLİ: technologies=Java&technologies=React biçimi için (varsayılan technologies[]=Java backend'de çalışmaz)
+    paramsSerializer: { indexes: null },
 });
 
 api.interceptors.request.use((config) => {
-  const access = tokens.getAccess();
-  if (access) config.headers.Authorization = `Bearer ${access}`;
-  return config;
+    const access = tokens.getAccess();
+    if (access) config.headers.Authorization = `Bearer ${access}`;
+    return config;
 });
 
 let refreshPromise: Promise<void> | null = null;
 
 async function refreshTokens(): Promise<void> {
-  const refreshToken = tokens.getRefresh();
-  if (!refreshToken) throw new Error("Refresh token yok");
-  // Burada `api` değil düz `axios` kullanılıyor: yenileme isteği kendi interceptor'una takılmasın.
-  const { data } = await axios.post<LoginResponse>(`${baseURL}/api/auth/refresh`, { refreshToken });
-  tokens.set(data.accessToken, data.refreshToken); // yeni refresh token'ı KAYDETMEK şart
+    const refreshToken = tokens.getRefresh();
+    if (!refreshToken) throw new Error("Refresh token yok");
+    // Burada `api` değil düz `axios` kullanılıyor: yenileme isteği kendi interceptor'una takılmasın.
+    const { data } = await axios.post<LoginResponse>(`${baseURL}/api/auth/refresh`, { refreshToken });
+    tokens.set(data.accessToken, data.refreshToken); // yeni refresh token'ı KAYDETMEK şart
 }
 
 type RetryConfig = InternalAxiosRequestConfig & { _retry?: boolean };
 
 api.interceptors.response.use(
-  (response) => response,
-  async (error: AxiosError) => {
-    const original = error.config as RetryConfig | undefined;
-    const isAuthEndpoint = original?.url?.startsWith("/api/auth/");
+    (response) => response,
+    async (error: AxiosError) => {
+        const original = error.config as RetryConfig | undefined;
+        const isAuthEndpoint = original?.url?.startsWith("/api/auth/");
 
-    if (error.response?.status === 401 && original && !original._retry && !isAuthEndpoint && tokens.getRefresh()) {
-      original._retry = true;
-      try {
-        // Devam eden bir yenileme varsa onu bekle; yoksa yenisini başlat.
-        refreshPromise ??= refreshTokens().finally(() => { refreshPromise = null; });
-        await refreshPromise;
-        return api(original); // aynı isteği yeni token'la tekrarla
-      } catch {
-        tokens.clear();
-        window.location.assign("/login");
-      }
+        if (error.response?.status === 401 && original && !original._retry && !isAuthEndpoint && tokens.getRefresh()) {
+            original._retry = true;
+            try {
+                // Devam eden bir yenileme varsa onu bekle; yoksa yenisini başlat.
+                refreshPromise ??= refreshTokens().finally(() => { refreshPromise = null; });
+                await refreshPromise;
+                return api(original); // aynı isteği yeni token'la tekrarla
+            } catch {
+                tokens.clear();
+                window.location.assign("/login");
+            }
+        }
+        return Promise.reject(error);
     }
-    return Promise.reject(error);
-  }
 );
+
+// 429 (hız sınırı): otomatik tekrar deneme YAPMA, bekleme süresini arayüze ilet.
+export function retryAfterSeconds(error: unknown): number | null {
+    const e = error as AxiosError;
+    if (e?.response?.status !== 429) return null;
+    const v = Number(e.response.headers?.["retry-after"]);
+    return Number.isFinite(v) && v > 0 ? v : 30; // başlık yoksa varsayılan 30 sn
+}
 ```
 
 ### 9.4 Hata okuma yardımcısı
@@ -1236,15 +1286,15 @@ import axios from "axios";
 import type { ApiError } from "./types";
 
 export function parseError(error: unknown) {
-  if (axios.isAxiosError(error)) {
-    const data = error.response?.data as Partial<ApiError> | undefined;
-    return {
-      status: error.response?.status ?? 0,           // 0 = sunucuya hiç ulaşılamadı
-      message: data?.message ?? (error.response ? "Beklenmeyen bir hata oluştu." : "Sunucuya ulaşılamadı."),
-      fieldErrors: data?.fieldErrors ?? {},          // { "githubUrl": "..." }
-    };
-  }
-  return { status: 0, message: "Beklenmeyen bir hata oluştu.", fieldErrors: {} as Record<string, string> };
+    if (axios.isAxiosError(error)) {
+        const data = error.response?.data as Partial<ApiError> | undefined;
+        return {
+            status: error.response?.status ?? 0,           // 0 = sunucuya hiç ulaşılamadı
+            message: data?.message ?? (error.response ? "Beklenmeyen bir hata oluştu." : "Sunucuya ulaşılamadı."),
+            fieldErrors: data?.fieldErrors ?? {},          // { "githubUrl": "..." }
+        };
+    }
+    return { status: 0, message: "Beklenmeyen bir hata oluştu.", fieldErrors: {} as Record<string, string> };
 }
 ```
 
@@ -1252,11 +1302,11 @@ Form hatasını alanlara dağıtma (react-hook-form ile):
 
 ```ts
 try {
-  await updateProfile(values);
+    await updateProfile(values);
 } catch (e) {
-  const { message, fieldErrors } = parseError(e);
-  Object.entries(fieldErrors).forEach(([field, msg]) => setError(field as any, { message: msg }));
-  if (Object.keys(fieldErrors).length === 0) setFormError(message); // genel hata
+    const { message, fieldErrors } = parseError(e);
+    Object.entries(fieldErrors).forEach(([field, msg]) => setError(field as any, { message: msg }));
+    if (Object.keys(fieldErrors).length === 0) setFormError(message); // genel hata
 }
 ```
 
@@ -1265,40 +1315,49 @@ try {
 ```ts
 // src/api/postings.ts
 import { api } from "./client";
-import type { Application, Page, Posting, PostingSummary, PostingType } from "./types";
+import { tokens } from "./tokens";
+import type { Application, ChangePasswordRequest, LoginResponse, MyPosting, Page, Posting, PostingSummary, PostingType } from "./types";
 
 export interface FeedParams {
-  page?: number; size?: number; sort?: "NEWEST" | "DEADLINE";
-  type?: PostingType; query?: string; technologies?: string[];
-  role?: string; department?: string; university?: string; hasVacancy?: boolean;
+    page?: number; size?: number; sort?: "NEWEST" | "DEADLINE";
+    type?: PostingType; query?: string; technologies?: string[];
+    role?: string; department?: string; university?: string; hasVacancy?: boolean;
 }
 
 // Boş metinleri ayıkla ki adrese `query=` gibi gereksiz parametreler eklenmesin
 const clean = <T extends object>(obj: T) =>
-  Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== "" && v !== undefined && v !== null)) as T;
+    Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== "" && v !== undefined && v !== null)) as T;
 
 export const getFeed = (params: FeedParams) =>
-  api.get<Page<PostingSummary>>("/api/postings", { params: clean(params) }).then((r) => r.data);
+    api.get<Page<PostingSummary>>("/api/postings", { params: clean(params) }).then((r) => r.data);
 
 export const getPosting = (id: string) =>
-  api.get<Posting>(`/api/postings/${id}`).then((r) => r.data);
+    api.get<Posting>(`/api/postings/${id}`).then((r) => r.data);
 
 export const applyToPosting = (postingId: string, body: { message?: string; roleIds: string[] }) =>
-  api.post<Application>(`/api/postings/${postingId}/applications`, body).then((r) => r.data);
+    api.post<Application>(`/api/postings/${postingId}/applications`, body).then((r) => r.data);
 
 export const acceptApplication = (applicationId: string, roleId: string) =>
-  api.post(`/api/applications/${applicationId}/accept`, { roleId }).then((r) => r.data);
+    api.post(`/api/applications/${applicationId}/accept`, { roleId }).then((r) => r.data);
 
 export const rejectApplication = (applicationId: string) =>
-  api.post(`/api/applications/${applicationId}/reject`).then((r) => r.data);
+    api.post(`/api/applications/${applicationId}/reject`).then((r) => r.data);
 
 export const withdrawApplication = (applicationId: string) =>
-  api.post<Application>(`/api/applications/${applicationId}/withdraw`).then((r) => r.data);
+    api.post<Application>(`/api/applications/${applicationId}/withdraw`).then((r) => r.data);
 
 export const saveCall = (postingId: string) => api.put(`/api/saved-postings/${postingId}`);
 export const unsaveCall = (postingId: string) => api.delete(`/api/saved-postings/${postingId}`);
+export const getMyPostings = (page = 0, size = 12) =>
+    api.get<Page<MyPosting>>("/api/users/me/postings", { params: { page, size } }).then((r) => r.data);
+
+export const changePassword = async (body: ChangePasswordRequest) => {
+    const { data } = await api.post<LoginResponse>("/api/users/me/password", body);
+    tokens.set(data.accessToken, data.refreshToken); // yeni token çiftini kaydet, eskileri geçersiz
+};
+
 export const getPendingCount = () =>
-  api.get<{ pendingCount: number }>("/api/applications/incoming/pending-count").then((r) => r.data.pendingCount);
+    api.get<{ pendingCount: number }>("/api/applications/incoming/pending-count").then((r) => r.data.pendingCount);
 ```
 
 ### 9.6 Giriş durumu (Context) ve korumalı sayfalar
@@ -1308,27 +1367,27 @@ export const getPendingCount = () =>
 const AuthContext = createContext<{ me: Profile | null; loading: boolean; login: ...; logout: ... } | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [me, setMe] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
+    const [me, setMe] = useState<Profile | null>(null);
+    const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!tokens.getAccess()) { setLoading(false); return; }
-    api.get<Profile>("/api/users/me")
-      .then((r) => setMe(r.data))
-      .catch(() => tokens.clear())          // 401 + yenileme de başarısızsa buraya düşer
-      .finally(() => setLoading(false));
-  }, []);
+    useEffect(() => {
+        if (!tokens.getAccess()) { setLoading(false); return; }
+        api.get<Profile>("/api/users/me")
+            .then((r) => setMe(r.data))
+            .catch(() => tokens.clear())          // 401 + yenileme de başarısızsa buraya düşer
+            .finally(() => setLoading(false));
+    }, []);
 
-  // login: POST /api/auth/login → tokens.set(...) → GET /api/users/me → setMe
-  // logout: POST /api/auth/logout (hata verse bile devam) → tokens.clear() → setMe(null)
-  ...
+    // login: POST /api/auth/login → tokens.set(...) → GET /api/users/me → setMe
+    // logout: POST /api/auth/logout (hata verse bile devam) → tokens.clear() → setMe(null)
+...
 }
 
 // Korumalı sayfa sarmalayıcısı
 export function RequireAuth({ children }: { children: ReactElement }) {
-  const { me, loading } = useAuth();
-  if (loading) return <Spinner />;
-  return me ? children : <Navigate to="/login" replace />;
+    const { me, loading } = useAuth();
+    if (loading) return <Spinner />;
+    return me ? children : <Navigate to="/login" replace />;
 }
 ```
 
@@ -1337,24 +1396,24 @@ export function RequireAuth({ children }: { children: ReactElement }) {
 ```tsx
 // Anasayfa: filtre değişince yeniden çeker, yeni veri gelene kadar eskisini gösterir (titreme olmaz)
 const feed = useQuery({
-  queryKey: ["feed", filters],
-  queryFn: () => getFeed(filters),
-  placeholderData: keepPreviousData,
+    queryKey: ["feed", filters],
+    queryFn: () => getFeed(filters),
+    placeholderData: keepPreviousData,
 });
 
 // Başvuru yapma: başarılı olunca ilgili önbellekleri tazele
 const apply = useMutation({
-  mutationFn: (body: { message?: string; roleIds: string[] }) => applyToPosting(postingId, body),
-  onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ["my-applications"] });
-    queryClient.invalidateQueries({ queryKey: ["posting", postingId] });
-  },
+    mutationFn: (body: { message?: string; roleIds: string[] }) => applyToPosting(postingId, body),
+    onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["my-applications"] });
+        queryClient.invalidateQueries({ queryKey: ["posting", postingId] });
+    },
 });
 
 // Kabul/red sonrası: gelen başvurular listesi ve rozet
 onSuccess: () => {
-  queryClient.invalidateQueries({ queryKey: ["incoming", postingId] });
-  queryClient.invalidateQueries({ queryKey: ["pending-count"] });
+    queryClient.invalidateQueries({ queryKey: ["incoming", postingId] });
+    queryClient.invalidateQueries({ queryKey: ["pending-count"] });
 }
 ```
 
@@ -1368,13 +1427,13 @@ const [params] = useSearchParams();
 const started = useRef(false);
 
 useEffect(() => {
-  if (started.current) return;      // geliştirme modunda efekt iki kez çalışır; isteği tek sefer at
-  started.current = true;
-  const token = params.get("token");
-  if (!token) { setState("invalid"); return; }
-  api.post("/api/auth/verify-email", { token })
-    .then(() => setState("ok"))
-    .catch(() => setState("invalid"));
+    if (started.current) return;      // geliştirme modunda efekt iki kez çalışır; isteği tek sefer at
+    started.current = true;
+    const token = params.get("token");
+    if (!token) { setState("invalid"); return; }
+    api.post("/api/auth/verify-email", { token })
+        .then(() => setState("ok"))
+        .catch(() => setState("invalid"));
 }, []);
 ```
 
@@ -1382,12 +1441,12 @@ useEffect(() => {
 
 ```ts
 export function useDebounce<T>(value: T, delay = 400) {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-  return debounced;
+    const [debounced, setDebounced] = useState(value);
+    useEffect(() => {
+        const t = setTimeout(() => setDebounced(value), delay);
+        return () => clearTimeout(t);
+    }, [value, delay]);
+    return debounced;
 }
 // const query = useDebounce(searchText);  → filters.query olarak kullan
 ```
@@ -1396,13 +1455,13 @@ export function useDebounce<T>(value: T, delay = 400) {
 
 ```ts
 export const postingTypeLabel: Record<PostingType, string> = {
-  PROJECT: "Proje", COMPETITION: "Yarışma", STARTUP: "Girişim",
+    PROJECT: "Proje", COMPETITION: "Yarışma", STARTUP: "Girişim",
 };
 export const stageLabel: Record<PostingStage, string> = {
-  IDEA: "Fikir", PROTOTYPE: "Prototip", PRODUCT: "Ürün",
+    IDEA: "Fikir", PROTOTYPE: "Prototip", PRODUCT: "Ürün",
 };
 export const applicationStatusLabel: Record<ApplicationStatus, string> = {
-  PENDING: "Bekliyor", ACCEPTED: "Kabul edildi", REJECTED: "Reddedildi", WITHDRAWN: "Geri çekildi",
+    PENDING: "Bekliyor", ACCEPTED: "Kabul edildi", REJECTED: "Reddedildi", WITHDRAWN: "Geri çekildi",
 };
 
 // Gösterim: UTC → yerel saat
@@ -1440,6 +1499,8 @@ Token 15 dakikada dolar; tekrar login olup yenisini yapıştır.
 | **Dolu role başvuru yapabiliyorum** | Doğru: backend dolu role başvuruyu engellemez, sadece **kabulde** engeller. Dolu rolü seçtirmemek arayüz tasarım kararı. |
 | **Hata mesajı gelmiyor (401)** | `401` yanıtının gövdesi boştur. Durum koduna göre kendi mesajını göster. |
 | **Aynı anda iki sekme açık, biri çıkış yaptı** | Refresh token tek kullanımlık olduğu için iki sekme **aynı anda** yenilerse biri başarısız olup çıkış yapabilir. Önemli bir sorun değil; ileride `storage` olayıyla sekmeler arası senkron eklenebilir. |
+| **429 geliyor** | Güvenlik katmanı kısa sürede çok fazla istek (ya da çok sayıda başarısız giriş) gördü. `Retry-After` süresi kadar bekle, otomatik tekrar deneme. Arama kutusunda debounce (9.9) kullan, bekleyen rozeti için 60 sn'den sık sorgu atma. |
+| **Şifre değiştirince diğer cihazlar çıkış yaptı** | Beklenen davranış: tüm eski refresh token'lar iptal edilir. Yanıttaki yeni token çiftini kaydetmeyi unutma, yoksa kendi oturumun da düşer. |
 | **Bir hata mesajı İngilizce geldi** | Doğrulama hatalarının metni (`fieldErrors`) Türkçe'dir; bilinmeyen adres (404) ve yanlış metot (405) gibi framework hatalarının gövdesi İngilizce olabilir. Durum koduna göre kendi Türkçe mesajını göster. |
 
 **Genel öneriler:**
@@ -1452,18 +1513,16 @@ Token 15 dakikada dolar; tekrar login olup yenisini yapıştır.
 
 ## 11. Henüz hazır olmayanlar
 
-Aşağıdakiler için **endpoint yok**; arayüzde şimdilik gösterme ya da "yakında" olarak işaretle.
+Aşağıdakiler için **endpoint yok**; arayüzde şimdilik gösterme ya da "yakında" olarak işaretle. (13 Kasım 2026 itibarıyla `saved` bayrağı, İlanlarım ve şifre değiştirme **hazır**.)
 
 | Özellik | Durum |
 |---|---|
 | **Mesajlaşma** (menüdeki "Mesaj") | Planlı, henüz yok |
 | **Bildirimler / anlık güncelleme** | Yok. Başvuru rozetini yenilemek için periyodik istek at (5.5) |
-| **"İlanlarım" listesi** (kendi açtığım ilanlar) | Planlı (`GET /api/users/me/postings`). Şimdilik kullanıcının kendi ilanlarına anasayfa filtresiyle ulaşma yolu yok; ilan oluşturunca yönlendirilen detay sayfası bir giriş noktasıdır |
-| **İlan yanıtında `saved` bayrağı** (kalp ikonunun durumu) | **Yakında.** Şimdilik `GET /api/saved-postings` ile id listesi çekip karşılaştır (5.7) |
 | **İlan detayında "bu ilana başvurdum mu"** | Alan yok; `GET /api/applications/mine` ile bul (5.7) |
 | **Başka kullanıcının profil sayfası** | Yok (sadece ilan sahibi kartı ve gelen başvurulardaki başvuran bilgisi) |
 | **Profilde projeler, CV bağlantısı** | Planlı (önce CV bağlantısı ve "Projeler" bölümü), henüz yok |
-| **Şifre değiştirme (giriş yapmışken), hesap silme, e-posta değiştirme** ("Settings") | Yok |
+| **Hesap silme, e-posta değiştirme** ("Settings") | Yok. Şifre değiştirme artık var (5.13) |
 | **İlandaki rolleri düzenleme** | Yok (ilan açıldıktan sonra roller değişmez) |
 | **Yönetici paneli** (kullanıcı/ilan yönetimi) | Planlı |
 | **Üniversite ve bölüm listesi** | Serbest metin; filtreler "içerir" mantığıyla çalışır. İleride seçilebilir liste düşünülebilir |
@@ -1510,4 +1569,4 @@ Bir sorun yaşarsan şunları paylaş, çok daha hızlı çözeriz:
 3. Yanıtın **durum kodu ve gövdesi**.
 4. Mümkünse Swagger'da aynı isteği denediğinde ne olduğu.
 
-*Belgenin yazıldığı tarih: 19 Ekim 2026. Backend'in o günkü hâlini anlatır.*
+*Son güncelleme: 13 Kasım 2026 (ilk yazım: 19 Ekim 2026). Backend'in o günkü hâlini anlatır.*

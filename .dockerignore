@@ -3,3 +3,5 @@ target
 .idea
 *.iml
 HELP.md
+ml/
+backend/ml/
