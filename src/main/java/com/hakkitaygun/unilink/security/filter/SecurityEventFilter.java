@@ -21,6 +21,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -116,13 +117,40 @@ public class SecurityEventFilter extends OncePerRequestFilter {
     }
 
     /** Eşleşen Spring şablonu ("/api/postings/{id}"); eşleşme yoksa kimlikleri maskelenmiş ham yol. */
+    private static final Set<String> KNOWN_RESOURCES = Set.of(
+            "auth", "users", "postings", "applications", "saved-postings", "technologies");
+    private static final Set<String> AUTH_ENDPOINTS = Set.of(
+            "login", "logout", "refresh", "register", "verify-email",
+            "forgot-password", "reset-password", "resend-verification");
+
+    /** Eşleşen Spring şablonu; eşleşme yoksa sınırlı sayıda değer üreten kaba yol. */
     private String resolvePathPattern(HttpServletRequest request, String rawPath) {
         Object matched = request.getAttribute(BEST_PATTERN_ATTRIBUTE);
         if (matched instanceof String pattern && !pattern.isBlank()) {
             return pattern;
         }
-        String masked = UUID_SEGMENT.matcher(rawPath).replaceAll("{id}");
-        return masked.replaceAll("/\\d+(?=/|$)", "/{n}");
+        return coarsePath(rawPath);
+    }
+
+    private String coarsePath(String rawPath) {
+        String[] seg = rawPath.split("/");          // "/api/postings/x" -> ["", "api", "postings", "x"]
+        if (seg.length < 3 || !"api".equals(seg[1])) {
+            return "/**";
+        }
+        String resource = seg[2];
+        if ("admin".equals(resource)) {
+            return "/api/admin/**";
+        }
+        if (!KNOWN_RESOURCES.contains(resource)) {
+            return "/api/**";
+        }
+        if (seg.length == 3) {
+            return "/api/" + resource;
+        }
+        if ("auth".equals(resource) && seg.length == 4 && AUTH_ENDPOINTS.contains(seg[3])) {
+            return "/api/auth/" + seg[3];
+        }
+        return "/api/" + resource + "/**";
     }
 
     private UUID resolveUserId(HttpServletRequest request) {

@@ -77,4 +77,22 @@ public class RiskScoreStore {
         states.entrySet().removeIf(entry ->
                 entry.getValue().blockedUntilMs() <= now && decay(entry.getValue(), now) < 1.0);
     }
+
+    /** Şu an skoru anlamlı (>=1) ya da engelli tüm istemcilerin anlık görüntüsü; yüksekten düşüğe sıralı. */
+    public java.util.List<RiskSnapshot> snapshot(long nowMs) {
+        java.util.List<RiskSnapshot> out = new java.util.ArrayList<>();
+        states.forEach((id, st) -> {
+            double score = decay(st, nowMs);
+            boolean blocked = st.blockedUntilMs() > nowMs;
+            if (score >= 1.0 || blocked) {
+                out.add(new RiskSnapshot(id, Math.round(score * 100.0) / 100.0,
+                        RiskBand.of(score).name(), blocked ? st.blockedUntilMs() : 0));
+            }
+        });
+        out.sort((a, b) -> Double.compare(b.score(), a.score()));
+        return out;
+    }
+
+    public record RiskSnapshot(String identity, double score, String band, long blockedUntilMs) {
+    }
 }
